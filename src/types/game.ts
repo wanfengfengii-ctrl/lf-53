@@ -15,9 +15,22 @@ export interface ThrowResult {
   landPosition: { x: number; y: number; z: number };
   maxHeight: number;
   flightTime: number;
+  bestAngleRangeAtTime: { min: number; max: number } | null;
 }
 
 export type GameMode = 'free' | 'training';
+
+export type TrainingDifficulty = 'easy' | 'medium' | 'hard';
+
+export interface TrainingTarget {
+  distance: number;
+  height: number;
+  potRadius: number;
+  difficulty: TrainingDifficulty;
+  requiredHits: number;
+  maxAttempts: number;
+  description: string;
+}
 
 export interface GameState {
   mode: GameMode;
@@ -26,7 +39,9 @@ export interface GameState {
   isPlaying: boolean;
   currentTrajectory: { x: number; y: number; z: number }[];
   bestAngleRange: { min: number; max: number } | null;
-  trainingTarget: { distance: number; height: number } | null;
+  trainingTarget: TrainingTarget | null;
+  trainingCompleted: boolean;
+  trainingScore: number;
 }
 
 export interface TrajectoryPoint {

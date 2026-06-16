@@ -58,7 +58,8 @@ function App() {
               </Box>
               <Box
                 style={{
-                  height: 360,
+                  height: 380,
+                  flexShrink: 0,
                 }}
               >
                 <StatsCharts />

@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, type ReactNode } from 'react';
-import type { GameParams, GameState, GameMode, ThrowResult } from '../types/game';
-import { calculateTrajectory, performThrow, findBestAngleRange } from '../utils/physics';
+import type { GameParams, GameState, GameMode, ThrowResult, TrainingDifficulty } from '../types/game';
+import { calculateTrajectory, performThrow, findBestAngleRange, generateTrainingTarget, calculateTrainingScore } from '../utils/physics';
 
 const initialParams: GameParams = {
   launchPosition: { x: -5, y: 1, z: 0 },
@@ -18,6 +18,8 @@ const initialState: GameState = {
   currentTrajectory: [],
   bestAngleRange: null,
   trainingTarget: null,
+  trainingCompleted: false,
+  trainingScore: 0,
 };
 
 type GameAction =
@@ -27,7 +29,8 @@ type GameAction =
   | { type: 'END_THROW'; payload: ThrowResult }
   | { type: 'RESET_RESULTS' }
   | { type: 'UPDATE_TRAJECTORY'; payload: { x: number; y: number; z: number }[] }
-  | { type: 'SET_TRAINING_TARGET'; payload: { distance: number; height: number } | null };
+  | { type: 'START_TRAINING'; payload: TrainingDifficulty }
+  | { type: 'COMPLETE_TRAINING'; payload: number };
 
 function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
@@ -37,6 +40,9 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         mode: action.payload,
         results: [],
         bestAngleRange: null,
+        trainingTarget: null,
+        trainingCompleted: false,
+        trainingScore: 0,
       };
 
     case 'SET_PARAMS': {
@@ -53,14 +59,42 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, isPlaying: true };
 
     case 'END_THROW': {
-      const newResults = [...state.results, action.payload];
+      const resultWithBestAngle = {
+        ...action.payload,
+        bestAngleRangeAtTime: action.payload.bestAngleRangeAtTime ?? null,
+      };
+      const newResults = [...state.results, resultWithBestAngle];
+
+      if (!resultWithBestAngle.bestAngleRangeAtTime) {
+        const range = findBestAngleRange(newResults);
+        resultWithBestAngle.bestAngleRangeAtTime = range;
+        newResults[newResults.length - 1] = resultWithBestAngle;
+      }
+
       const bestAngleRange =
         state.mode === 'free' ? findBestAngleRange(newResults) : null;
+
+      let trainingCompleted = state.trainingCompleted;
+      let trainingScore = state.trainingScore;
+
+      if (state.mode === 'training' && state.trainingTarget) {
+        const hits = newResults.filter((r) => r.hit).length;
+        if (hits >= state.trainingTarget.requiredHits) {
+          trainingCompleted = true;
+          trainingScore = calculateTrainingScore(newResults, state.trainingTarget);
+        } else if (newResults.length >= state.trainingTarget.maxAttempts) {
+          trainingCompleted = true;
+          trainingScore = 0;
+        }
+      }
+
       return {
         ...state,
         isPlaying: false,
         results: newResults,
         bestAngleRange,
+        trainingCompleted,
+        trainingScore,
       };
     }
 
@@ -69,13 +103,41 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         ...state,
         results: [],
         bestAngleRange: null,
+        trainingCompleted: false,
+        trainingScore: 0,
       };
 
     case 'UPDATE_TRAJECTORY':
       return { ...state, currentTrajectory: action.payload };
 
-    case 'SET_TRAINING_TARGET':
-      return { ...state, trainingTarget: action.payload };
+    case 'START_TRAINING': {
+      const target = generateTrainingTarget(action.payload);
+      const newParams: GameParams = {
+        ...state.params,
+        launchPosition: { x: -target.distance, y: target.height, z: 0 },
+        potPosition: { x: 0, y: 0, z: 0 },
+        potRadius: target.potRadius,
+      };
+      const trajectory = calculateTrajectory(newParams);
+      return {
+        ...state,
+        mode: 'training',
+        params: newParams,
+        currentTrajectory: trajectory,
+        results: [],
+        bestAngleRange: null,
+        trainingTarget: target,
+        trainingCompleted: false,
+        trainingScore: 0,
+      };
+    }
+
+    case 'COMPLETE_TRAINING':
+      return {
+        ...state,
+        trainingCompleted: true,
+        trainingScore: action.payload,
+      };
 
     default:
       return state;
@@ -90,7 +152,7 @@ interface GameContextType {
   endThrow: (result: ThrowResult) => void;
   resetResults: () => void;
   performThrowAction: () => ThrowResult | null;
-  setTrainingTarget: (target: { distance: number; height: number } | null) => void;
+  startTraining: (difficulty: TrainingDifficulty) => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -120,13 +182,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   const performThrowAction = (): ThrowResult | null => {
     if (state.isPlaying) return null;
-    const result = performThrow(state.params, state.results.length + 1);
+    const result = performThrow(state.params, state.results.length + 1, state.results);
     startThrow();
     return result;
   };
 
-  const setTrainingTarget = (target: { distance: number; height: number } | null) => {
-    dispatch({ type: 'SET_TRAINING_TARGET', payload: target });
+  const startTraining = (difficulty: TrainingDifficulty) => {
+    dispatch({ type: 'START_TRAINING', payload: difficulty });
   };
 
   return (
@@ -139,7 +201,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         endThrow,
         resetResults,
         performThrowAction,
-        setTrainingTarget,
+        startTraining,
       }}
     >
       {children}

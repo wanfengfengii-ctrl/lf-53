@@ -1,4 +1,4 @@
-import type { GameParams, TrajectoryPoint, ThrowResult } from '../types/game';
+import type { GameParams, TrajectoryPoint, ThrowResult, TrainingTarget, TrainingDifficulty } from '../types/game';
 
 const GRAVITY = 9.8;
 const TIME_STEP = 0.02;
@@ -92,7 +92,11 @@ export function calculateFlightTime(trajectory: TrajectoryPoint[]): number {
   return prev.t + (last.t - prev.t) * ratio;
 }
 
-export function performThrow(params: GameParams, id: number): ThrowResult {
+export function performThrow(
+  params: GameParams,
+  id: number,
+  previousResults: ThrowResult[]
+): ThrowResult {
   const trajectory = calculateTrajectory(params);
   const landingPos = calculateLandingPosition(trajectory);
   const { hit, deviationDistance } = checkHit(
@@ -103,6 +107,20 @@ export function performThrow(params: GameParams, id: number): ThrowResult {
   const maxHeight = calculateMaxHeight(trajectory);
   const flightTime = calculateFlightTime(trajectory);
 
+  const allResultsIncludingThis = [...previousResults, {
+    id: 0,
+    timestamp: 0,
+    params: { ...params },
+    hit,
+    deviationDistance,
+    landPosition: landingPos,
+    maxHeight,
+    flightTime,
+    bestAngleRangeAtTime: null,
+  }];
+
+  const bestAngleRangeAtTime = findBestAngleRange(allResultsIncludingThis);
+
   return {
     id,
     timestamp: Date.now(),
@@ -112,6 +130,7 @@ export function performThrow(params: GameParams, id: number): ThrowResult {
     landPosition: landingPos,
     maxHeight,
     flightTime,
+    bestAngleRangeAtTime,
   };
 }
 
@@ -165,4 +184,57 @@ export function getDeviationDistribution(
   }
 
   return distribution;
+}
+
+export function generateTrainingTarget(difficulty: TrainingDifficulty): TrainingTarget {
+  const configs: Record<TrainingDifficulty, {
+    distance: number;
+    height: number;
+    potRadius: number;
+    requiredHits: number;
+    maxAttempts: number;
+    description: string;
+  }> = {
+    easy: {
+      distance: 5,
+      height: 1,
+      potRadius: 0.5,
+      requiredHits: 3,
+      maxAttempts: 10,
+      description: '近距离 · 大壶口 · 入门练习',
+    },
+    medium: {
+      distance: 8,
+      height: 1,
+      potRadius: 0.35,
+      requiredHits: 3,
+      maxAttempts: 8,
+      description: '中距离 · 标准壶口 · 技巧提升',
+    },
+    hard: {
+      distance: 12,
+      height: 1.2,
+      potRadius: 0.2,
+      requiredHits: 2,
+      maxAttempts: 6,
+      description: '远距离 · 小壶口 · 高手挑战',
+    },
+  };
+
+  return { ...configs[difficulty], difficulty };
+}
+
+export function calculateTrainingScore(
+  results: ThrowResult[],
+  target: TrainingTarget
+): number {
+  const hits = results.filter((r) => r.hit).length;
+  if (hits < target.requiredHits) return 0;
+
+  const baseScore = 60;
+  const hitBonus = Math.min(hits, target.maxAttempts) * 5;
+  const efficiencyBonus = Math.max(0, Math.round((1 - results.length / target.maxAttempts) * 20));
+  const difficultyMultiplier = target.difficulty === 'hard' ? 1.5 : target.difficulty === 'medium' ? 1.2 : 1;
+
+  return Math.round((baseScore + hitBonus + efficiencyBonus) * difficultyMultiplier);
 }

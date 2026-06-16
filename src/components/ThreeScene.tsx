@@ -391,6 +391,7 @@ export default function ThreeScene() {
       landPosition: landingPos,
       maxHeight,
       flightTime,
+      bestAngleRangeAtTime: null,
     };
   };
 

@@ -1,4 +1,4 @@
-import { Card, Title, Text, Group, SimpleGrid, Box, Paper } from '@mantine/core';
+import { Card, Title, Text, Group, Box, Paper, SimpleGrid } from '@mantine/core';
 import {
   LineChart,
   Line,
@@ -11,6 +11,8 @@ import {
   ResponsiveContainer,
   Legend,
   ReferenceLine,
+  Area,
+  ComposedChart,
 } from 'recharts';
 import { useGame } from '../context/GameContext';
 import { calculateHitRate, getDeviationDistribution } from '../utils/physics';
@@ -31,10 +33,10 @@ export default function StatsCharts() {
 
   const deviationData = getDeviationDistribution(results, 8);
 
-  const forceData = results.map((result, index) => ({
+  const forceTrendData = results.map((result, index) => ({
     name: `第${index + 1}次`,
     力度: Number(result.params.launchForce.toFixed(1)),
-    角度: Number(result.params.launchAngle.toFixed(0)),
+    命中: result.hit ? 1 : 0,
     偏差: Number(result.deviationDistance.toFixed(2)),
   }));
 
@@ -58,22 +60,22 @@ export default function StatsCharts() {
           <Text c="dimmed">暂无数据，请开始投掷</Text>
         </Box>
       ) : (
-        <SimpleGrid cols={1} spacing="lg">
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
           <Box>
             <Group justify="space-between" mb="xs">
               <Text fw={500} size="sm">命中率趋势</Text>
               <Text size="xs" c="dimmed">
-                当前命中率: {(calculateHitRate(results) * 100).toFixed(1)}%
+                {(calculateHitRate(results) * 100).toFixed(1)}%
               </Text>
             </Group>
-            <Box h={180}>
+            <Box h={200}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={hitRateData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                   <XAxis
                     dataKey="name"
                     tick={{ fontSize: 10 }}
-                    interval={Math.floor(hitRateData.length / 5)}
+                    interval={Math.floor(hitRateData.length / 4)}
                   />
                   <YAxis
                     domain={[0, 100]}
@@ -100,14 +102,14 @@ export default function StatsCharts() {
 
           <Box>
             <Text fw={500} size="sm" mb="xs">偏差距离分布</Text>
-            <Box h={180}>
+            <Box h={200}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={deviationData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                   <XAxis
                     dataKey="range"
-                    tick={{ fontSize: 9 }}
-                    label={{ value: '偏差距离 (m)', position: 'insideBottom', offset: -5, fontSize: 10 }}
+                    tick={{ fontSize: 8 }}
+                    label={{ value: '偏差(m)', position: 'insideBottom', offset: -5, fontSize: 9 }}
                   />
                   <YAxis
                     tick={{ fontSize: 10 }}
@@ -128,68 +130,83 @@ export default function StatsCharts() {
           </Box>
 
           <Box>
-            <Text fw={500} size="sm" mb="xs">力度与角度变化趋势</Text>
-            <Box h={180}>
+            <Text fw={500} size="sm" mb="xs">力度变化趋势</Text>
+            <Box h={200}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={forceData}>
+                <ComposedChart data={forceTrendData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                   <XAxis
                     dataKey="name"
                     tick={{ fontSize: 10 }}
-                    interval={Math.floor(forceData.length / 5)}
+                    interval={Math.floor(forceTrendData.length / 4)}
                   />
                   <YAxis
                     yAxisId="left"
                     tick={{ fontSize: 10 }}
+                    domain={[0, 'auto']}
                     label={{ value: '力度', angle: -90, position: 'insideLeft', fontSize: 10 }}
                   />
                   <YAxis
                     yAxisId="right"
                     orientation="right"
                     tick={{ fontSize: 10 }}
-                    label={{ value: '角度(°)', angle: 90, position: 'insideRight', fontSize: 10 }}
+                    domain={[0, 'auto']}
+                    label={{ value: '偏差(m)', angle: 90, position: 'insideRight', fontSize: 10 }}
                   />
                   <Tooltip
                     contentStyle={{ fontSize: 12, borderRadius: '8px' }}
                   />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Area
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="偏差"
+                    fill="#ffe066"
+                    stroke="#fcc419"
+                    fillOpacity={0.3}
+                    strokeWidth={1}
+                  />
                   <Line
                     yAxisId="left"
                     type="monotone"
                     dataKey="力度"
                     stroke="#f59f00"
                     strokeWidth={2}
-                    dot={{ r: 2 }}
-                    activeDot={{ r: 4 }}
+                    dot={(props: Record<string, unknown>) => {
+                      const { cx, cy, payload } = props as { cx: number; cy: number; payload: { 命中: number } };
+                      return (
+                        <circle
+                          key={`dot-${cx}-${cy}`}
+                          cx={cx}
+                          cy={cy}
+                          r={4}
+                          fill={payload.命中 ? '#40c057' : '#fa5252'}
+                          stroke="#fff"
+                          strokeWidth={1}
+                        />
+                      );
+                    }}
+                    activeDot={{ r: 5 }}
                   />
-                  <Line
-                    yAxisId="right"
-                    type="monotone"
-                    dataKey="角度"
-                    stroke="#845ef7"
-                    strokeWidth={2}
-                    dot={{ r: 2 }}
-                    activeDot={{ r: 4 }}
-                  />
-                </LineChart>
+                </ComposedChart>
               </ResponsiveContainer>
             </Box>
           </Box>
-
-          {mode === 'free' && bestAngleRange && (
-            <Paper p="sm" bg="blue.0" radius="md" withBorder={false}>
-              <Group justify="space-between">
-                <Text size="sm" fw={500}>最佳命中角度区间</Text>
-                <Text size="sm" fw={700} c="blue">
-                  {bestAngleRange.min.toFixed(0)}° - {bestAngleRange.max.toFixed(0)}°
-                </Text>
-              </Group>
-              <Text size="xs" c="dimmed" mt="xs">
-                基于 {results.filter((r) => r.hit).length} 次命中记录计算
-              </Text>
-            </Paper>
-          )}
         </SimpleGrid>
+      )}
+
+      {mode === 'free' && bestAngleRange && hasData && (
+        <Paper p="sm" bg="blue.0" radius="md" withBorder={false} mt="md">
+          <Group justify="space-between">
+            <Text size="sm" fw={500}>最佳命中角度区间</Text>
+            <Text size="sm" fw={700} c="blue">
+              {bestAngleRange.min.toFixed(0)}° - {bestAngleRange.max.toFixed(0)}°
+            </Text>
+          </Group>
+          <Text size="xs" c="dimmed" mt="xs">
+            基于 {results.filter((r) => r.hit).length} 次命中记录计算
+          </Text>
+        </Paper>
       )}
     </Card>
   );

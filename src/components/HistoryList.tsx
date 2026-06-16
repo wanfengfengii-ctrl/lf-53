@@ -4,7 +4,7 @@ import { useGame } from '../context/GameContext';
 
 export default function HistoryList() {
   const { state } = useGame();
-  const { results, mode, bestAngleRange } = state;
+  const { results, mode, bestAngleRange, trainingTarget, trainingCompleted } = state;
 
   const reversedResults = [...results].reverse();
 
@@ -21,7 +21,18 @@ export default function HistoryList() {
         <Paper mb="sm" p="xs" bg="blue.0" radius="sm" withBorder={false}>
           <Group gap="xs">
             <IconTarget size={14} color="#228be6" />
-            <Text size="xs" fw={500}>最佳角度: {bestAngleRange.min.toFixed(0)}° - {bestAngleRange.max.toFixed(0)}°</Text>
+            <Text size="xs" fw={500}>全局最佳角度: {bestAngleRange.min.toFixed(0)}° - {bestAngleRange.max.toFixed(0)}°</Text>
+          </Group>
+        </Paper>
+      )}
+
+      {mode === 'training' && trainingTarget && (
+        <Paper mb="sm" p="xs" bg="grape.0" radius="sm" withBorder={false}>
+          <Group gap="xs">
+            <IconTarget size={14} color="#be4bdb" />
+            <Text size="xs" fw={500}>
+              {trainingCompleted ? '训练已结束' : `目标: 命中 ${trainingTarget.requiredHits} 次 | 剩余 ${Math.max(0, trainingTarget.maxAttempts - results.length)} 次`}
+            </Text>
           </Group>
         </Paper>
       )}
@@ -62,6 +73,11 @@ export default function HistoryList() {
                     <Text size="xs" c="dimmed" mt="xs">
                       角度: {result.params.launchAngle.toFixed(0)}° | 力度: {result.params.launchForce.toFixed(1)}
                     </Text>
+                    {result.bestAngleRangeAtTime && mode === 'free' && (
+                      <Text size="xs" c="blue" mt={4}>
+                        最佳区间: {result.bestAngleRangeAtTime.min.toFixed(0)}° - {result.bestAngleRangeAtTime.max.toFixed(0)}°
+                      </Text>
+                    )}
                   </Box>
                   <Box ta="right">
                     <Badge
