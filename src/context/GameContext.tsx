@@ -200,6 +200,8 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'START_SMART_TRAINING': {
+      if (state.results.length < 10) return state;
+      if (state.smartTrainingSession) return state;
       const session = createSmartTrainingSession(state.results);
       const firstLevel = session.levels[0];
       const disturbance = firstLevel.disturbance;
@@ -421,6 +423,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
   };
 
   const startSmartTraining = () => {
+    if (state.results.length < 10) {
+      console.warn(`[SmartTraining] 前置条件未满足：需要至少10次投掷记录，当前：${state.results.length}`);
+      return;
+    }
+    if (state.smartTrainingSession) {
+      console.warn('[SmartTraining] 训练已在进行中');
+      return;
+    }
     dispatch({ type: 'START_SMART_TRAINING' });
   };
 

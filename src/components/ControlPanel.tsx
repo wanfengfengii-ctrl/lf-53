@@ -32,6 +32,8 @@ import {
   IconChevronRight,
   IconEyeOff,
   IconGauge,
+  IconAlertTriangle,
+  IconClock,
 } from '@tabler/icons-react';
 import { useGame } from '../context/GameContext';
 import { calculateHitRate, analyzeRecentPerformance } from '../utils/physics';
@@ -305,7 +307,8 @@ export default function ControlPanel() {
                 每关有风力、横向偏移、壶口高度等扰动。
                 最佳角度已隐藏，请通过轨迹和热区自行探索！
               </Text>
-              {results.length > 0 && (
+
+              {results.length >= 10 ? (
                 <Box mb="sm">
                   <Group justify="space-between" mb="xs">
                     <Text size="xs" c="dimmed">最近 10 次表现</Text>
@@ -326,15 +329,39 @@ export default function ControlPanel() {
                     size="xs"
                   />
                 </Box>
+              ) : (
+                <Box mb="sm">
+                  <Paper p="xs" bg="yellow.0" radius="sm" withBorder>
+                    <Group gap="xs" mb="xs" align="flex-start">
+                      <IconAlertTriangle size={16} color="#f59f00" style={{ flexShrink: 0, marginTop: 2 }} />
+                      <Text size="xs" fw={500} c="yellow.9">
+                        请先完成至少 10 次投掷以建立基线数据
+                      </Text>
+                    </Group>
+                    <Text size="xs" c="dimmed" mb="xs">
+                      智能训练需要通过分析你的历史投掷习惯来动态生成个性化关卡。
+                      当前进度：{results.length} / 10 次
+                    </Text>
+                    <Progress
+                      value={(results.length / 10) * 100}
+                      color={results.length >= 8 ? 'green' : results.length >= 5 ? 'blue' : 'yellow'}
+                      size="md"
+                      striped
+                      animated
+                    />
+                  </Paper>
+                </Box>
               )}
+
               <Button
                 fullWidth
-                leftSection={<IconFlame size={16} />}
-                color="violet"
+                leftSection={results.length >= 10 ? <IconFlame size={16} /> : <IconClock size={16} />}
+                color={results.length >= 10 ? 'violet' : 'gray'}
                 onClick={startSmartTraining}
                 size="md"
+                disabled={results.length < 10}
               >
-                开始智能训练挑战
+                {results.length >= 10 ? '开始智能训练挑战' : `还差 ${10 - results.length} 次投掷`}
               </Button>
             </Paper>
           </>
