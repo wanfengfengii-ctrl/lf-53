@@ -11,6 +11,8 @@ import type {
   BattleConfig,
   BattleSession,
   BattleAnalysisData,
+  ReplaySession,
+  ReplayFilter,
 } from '../types/game';
 import {
   calculateTrajectory,
@@ -27,6 +29,11 @@ import {
   analyzeBattleSession,
   saveBattleHistory,
   updateBattleLeaderboard,
+  createReplaySession,
+  analyzeReplaySession,
+  generateReplaySummary,
+  saveReplaySession,
+  downloadReplayReport,
 } from '../utils/physics';
 
 const initialParams: GameParams = {
@@ -53,6 +60,21 @@ const initialState: GameState = {
   trainingAnalysis: null,
   battleSession: null,
   battleAnalysis: null,
+  replay: {
+    currentSession: null,
+    currentRoundIndex: 0,
+    isPlaying: false,
+    playbackSpeed: 1,
+    showTrajectories: 'all',
+    showHitMarkers: true,
+    filter: {
+      player: 'all',
+      hitOnly: false,
+      keyMomentsOnly: false,
+    },
+    analysis: null,
+    summary: null,
+  },
 };
 
 type GameAction =
@@ -74,7 +96,18 @@ type GameAction =
   | { type: 'START_BATTLE'; payload: BattleConfig }
   | { type: 'END_BATTLE_ROUND' }
   | { type: 'BATTLE_TIMED_OUT' }
-  | { type: 'EXIT_BATTLE' };
+  | { type: 'EXIT_BATTLE' }
+  | { type: 'START_REPLAY'; payload: ReplaySession }
+  | { type: 'END_REPLAY' }
+  | { type: 'SET_REPLAY_ROUND'; payload: number }
+  | { type: 'NEXT_REPLAY_ROUND' }
+  | { type: 'PREV_REPLAY_ROUND' }
+  | { type: 'TOGGLE_REPLAY_PLAY' }
+  | { type: 'SET_REPLAY_SPEED'; payload: number }
+  | { type: 'SET_REPLAY_TRAJECTORY_MODE'; payload: 'all' | 'current' | 'none' }
+  | { type: 'TOGGLE_HIT_MARKERS' }
+  | { type: 'SET_REPLAY_FILTER'; payload: Partial<ReplayFilter> }
+  | { type: 'EXPORT_REPLAY_REPORT' };
 
 function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
@@ -425,6 +458,9 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         };
         saveBattleHistory(historyEntry);
         updateBattleLeaderboard(updatedSession);
+        
+        const replaySession = createReplaySession(updatedSession);
+        saveReplaySession(replaySession);
       }
 
       const nextParams: GameParams = updatedSession.completed
@@ -468,6 +504,10 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       };
       saveBattleHistory(historyEntry);
       updateBattleLeaderboard(timedOutSession);
+      
+      const replaySession = createReplaySession(timedOutSession);
+      saveReplaySession(replaySession);
+      
       return {
         ...state,
         battleSession: timedOutSession,
@@ -488,6 +528,161 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         trainingCompleted: false,
         trainingScore: 0,
       };
+
+    case 'START_REPLAY': {
+      const session = action.payload;
+      const analysis = analyzeReplaySession(session);
+      const summary = generateReplaySummary(session, analysis);
+      const firstRound = session.rounds[0];
+      const newParams = firstRound ? { ...firstRound.params } : state.params;
+      const trajectory = firstRound ? firstRound.trajectory.map(p => ({ x: p.x, y: p.y, z: p.z })) : [];
+      
+      return {
+        ...state,
+        mode: 'free',
+        params: newParams,
+        currentTrajectory: trajectory,
+        battleSession: null,
+        battleAnalysis: null,
+        replay: {
+          ...state.replay,
+          currentSession: session,
+          currentRoundIndex: 0,
+          isPlaying: false,
+          playbackSpeed: 1,
+          showTrajectories: 'all',
+          showHitMarkers: true,
+          filter: {
+            player: 'all',
+            hitOnly: false,
+            keyMomentsOnly: false,
+          },
+          analysis,
+          summary,
+        },
+      };
+    }
+
+    case 'END_REPLAY':
+      return {
+        ...state,
+        replay: {
+          ...initialState.replay,
+        },
+      };
+
+    case 'SET_REPLAY_ROUND': {
+      const session = state.replay.currentSession;
+      if (!session) return state;
+      const index = Math.max(0, Math.min(action.payload, session.rounds.length - 1));
+      const round = session.rounds[index];
+      const trajectory = round.trajectory.map(p => ({ x: p.x, y: p.y, z: p.z }));
+      
+      return {
+        ...state,
+        params: { ...round.params },
+        currentTrajectory: trajectory,
+        replay: {
+          ...state.replay,
+          currentRoundIndex: index,
+        },
+      };
+    }
+
+    case 'NEXT_REPLAY_ROUND': {
+      const session = state.replay.currentSession;
+      if (!session) return state;
+      const nextIndex = Math.min(state.replay.currentRoundIndex + 1, session.rounds.length - 1);
+      const round = session.rounds[nextIndex];
+      const trajectory = round.trajectory.map(p => ({ x: p.x, y: p.y, z: p.z }));
+      
+      return {
+        ...state,
+        params: { ...round.params },
+        currentTrajectory: trajectory,
+        replay: {
+          ...state.replay,
+          currentRoundIndex: nextIndex,
+          isPlaying: nextIndex < session.rounds.length - 1 ? state.replay.isPlaying : false,
+        },
+      };
+    }
+
+    case 'PREV_REPLAY_ROUND': {
+      const session = state.replay.currentSession;
+      if (!session) return state;
+      const prevIndex = Math.max(0, state.replay.currentRoundIndex - 1);
+      const round = session.rounds[prevIndex];
+      const trajectory = round.trajectory.map(p => ({ x: p.x, y: p.y, z: p.z }));
+      
+      return {
+        ...state,
+        params: { ...round.params },
+        currentTrajectory: trajectory,
+        replay: {
+          ...state.replay,
+          currentRoundIndex: prevIndex,
+        },
+      };
+    }
+
+    case 'TOGGLE_REPLAY_PLAY':
+      return {
+        ...state,
+        replay: {
+          ...state.replay,
+          isPlaying: !state.replay.isPlaying,
+        },
+      };
+
+    case 'SET_REPLAY_SPEED':
+      return {
+        ...state,
+        replay: {
+          ...state.replay,
+          playbackSpeed: action.payload,
+        },
+      };
+
+    case 'SET_REPLAY_TRAJECTORY_MODE':
+      return {
+        ...state,
+        replay: {
+          ...state.replay,
+          showTrajectories: action.payload,
+        },
+      };
+
+    case 'TOGGLE_HIT_MARKERS':
+      return {
+        ...state,
+        replay: {
+          ...state.replay,
+          showHitMarkers: !state.replay.showHitMarkers,
+        },
+      };
+
+    case 'SET_REPLAY_FILTER':
+      return {
+        ...state,
+        replay: {
+          ...state.replay,
+          filter: {
+            ...state.replay.filter,
+            ...action.payload,
+          },
+        },
+      };
+
+    case 'EXPORT_REPLAY_REPORT': {
+      const session = state.replay.currentSession;
+      const analysis = state.replay.analysis;
+      const summary = state.replay.summary;
+      if (session && analysis && summary) {
+        downloadReplayReport(session, analysis, summary);
+      }
+      return state;
+    }
 
     default:
       return state;
@@ -513,6 +708,17 @@ interface GameContextType {
   performBattleThrow: () => void;
   battleTimedOut: () => void;
   exitBattle: () => void;
+  startReplay: (session: ReplaySession) => void;
+  endReplay: () => void;
+  setReplayRound: (index: number) => void;
+  nextReplayRound: () => void;
+  prevReplayRound: () => void;
+  toggleReplayPlay: () => void;
+  setReplaySpeed: (speed: number) => void;
+  setReplayTrajectoryMode: (mode: 'all' | 'current' | 'none') => void;
+  toggleHitMarkers: () => void;
+  setReplayFilter: (filter: Partial<ReplayFilter>) => void;
+  exportReplayReport: () => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -611,6 +817,50 @@ export function GameProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'EXIT_BATTLE' });
   };
 
+  const startReplay = (session: ReplaySession) => {
+    dispatch({ type: 'START_REPLAY', payload: session });
+  };
+
+  const endReplay = () => {
+    dispatch({ type: 'END_REPLAY' });
+  };
+
+  const setReplayRound = (index: number) => {
+    dispatch({ type: 'SET_REPLAY_ROUND', payload: index });
+  };
+
+  const nextReplayRound = () => {
+    dispatch({ type: 'NEXT_REPLAY_ROUND' });
+  };
+
+  const prevReplayRound = () => {
+    dispatch({ type: 'PREV_REPLAY_ROUND' });
+  };
+
+  const toggleReplayPlay = () => {
+    dispatch({ type: 'TOGGLE_REPLAY_PLAY' });
+  };
+
+  const setReplaySpeed = (speed: number) => {
+    dispatch({ type: 'SET_REPLAY_SPEED', payload: speed });
+  };
+
+  const setReplayTrajectoryMode = (mode: 'all' | 'current' | 'none') => {
+    dispatch({ type: 'SET_REPLAY_TRAJECTORY_MODE', payload: mode });
+  };
+
+  const toggleHitMarkers = () => {
+    dispatch({ type: 'TOGGLE_HIT_MARKERS' });
+  };
+
+  const setReplayFilter = (filter: Partial<ReplayFilter>) => {
+    dispatch({ type: 'SET_REPLAY_FILTER', payload: filter });
+  };
+
+  const exportReplayReport = () => {
+    dispatch({ type: 'EXPORT_REPLAY_REPORT' });
+  };
+
   return (
     <GameContext.Provider
       value={{
@@ -632,6 +882,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
         performBattleThrow,
         battleTimedOut,
         exitBattle,
+        startReplay,
+        endReplay,
+        setReplayRound,
+        nextReplayRound,
+        prevReplayRound,
+        toggleReplayPlay,
+        setReplaySpeed,
+        setReplayTrajectoryMode,
+        toggleHitMarkers,
+        setReplayFilter,
+        exportReplayReport,
       }}
     >
       {children}

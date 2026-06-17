@@ -230,3 +230,127 @@ export interface BattleLeaderboardEntry {
   avgHitRate: number;
   maxStreak: number;
 }
+
+export interface ReplayRound extends BattlePlayerRound {
+  trajectory: TrajectoryPoint[];
+  isKeyMoment: boolean;
+  keyMomentType?: 'streak_bonus' | 'turning_point' | 'clutch_hit' | 'big_miss';
+  keyMomentDescription?: string;
+}
+
+export interface ReplaySession {
+  id: number;
+  config: BattleConfig;
+  rounds: ReplayRound[];
+  player1Score: number;
+  player2Score: number;
+  player1Hits: number;
+  player2Hits: number;
+  player1MaxStreak: number;
+  player2MaxStreak: number;
+  winner: 1 | 2 | 0;
+  startTime: number;
+  endTime: number;
+  totalRounds: number;
+  duration: number;
+}
+
+export interface TurningPoint {
+  round: number;
+  type: 'comeback' | 'collapse' | 'streak_start' | 'streak_end' | 'lead_change';
+  description: string;
+  player: 1 | 2;
+  impactScore: number;
+  beforeScore: { player1: number; player2: number };
+  afterScore: { player1: number; player2: number };
+}
+
+export interface ReplayFilter {
+  player?: '1' | '2' | 'all';
+  hitOnly?: boolean;
+  minAngle?: number;
+  maxAngle?: number;
+  minForce?: number;
+  maxForce?: number;
+  minDeviation?: number;
+  maxDeviation?: number;
+  keyMomentsOnly?: boolean;
+}
+
+export interface ReplaySummary {
+  title: string;
+  date: string;
+  players: { name: string; score: number; hitRate: number; maxStreak: number }[];
+  winner: string;
+  totalRounds: number;
+  duration: string;
+  keyHighlights: string[];
+  performanceInsights: string[];
+}
+
+export interface ReplayAnalysisData {
+  scoreTimeline: { round: number; player1Score: number; player2Score: number; lead: 1 | 2 | 0 }[];
+  turningPoints: TurningPoint[];
+  keyMoments: ReplayRound[];
+  playerStats: {
+    player1: {
+      avgAngle: number;
+      avgForce: number;
+      angleStd: number;
+      forceStd: number;
+      avgDeviation: number;
+      hitRate: number;
+      clutchHitRate: number;
+      avgFlightTime: number;
+      avgMaxHeight: number;
+    };
+    player2: {
+      avgAngle: number;
+      avgForce: number;
+      angleStd: number;
+      forceStd: number;
+      avgDeviation: number;
+      hitRate: number;
+      clutchHitRate: number;
+      avgFlightTime: number;
+      avgMaxHeight: number;
+    };
+  };
+  comparison: {
+    angleAdvantage: 1 | 2 | 0;
+    forceAdvantage: 1 | 2 | 0;
+    accuracyAdvantage: 1 | 2 | 0;
+    stabilityAdvantage: 1 | 2 | 0;
+  };
+}
+
+export interface ReplayState {
+  currentSession: ReplaySession | null;
+  currentRoundIndex: number;
+  isPlaying: boolean;
+  playbackSpeed: number;
+  showTrajectories: 'all' | 'current' | 'none';
+  showHitMarkers: boolean;
+  filter: ReplayFilter;
+  analysis: ReplayAnalysisData | null;
+  summary: ReplaySummary | null;
+}
+
+export interface GameState {
+  mode: GameMode;
+  params: GameParams;
+  results: ThrowResult[];
+  isPlaying: boolean;
+  currentTrajectory: { x: number; y: number; z: number }[];
+  bestAngleRange: { min: number; max: number } | null;
+  trainingTarget: TrainingTarget | null;
+  trainingCompleted: boolean;
+  trainingScore: number;
+  disturbanceParams: DisturbanceParams;
+  heatZoneData: HeatZoneData | null;
+  smartTrainingSession: SmartTrainingSession | null;
+  trainingAnalysis: TrainingAnalysisData | null;
+  battleSession: BattleSession | null;
+  battleAnalysis: BattleAnalysisData | null;
+  replay: ReplayState;
+}

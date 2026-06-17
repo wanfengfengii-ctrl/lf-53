@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { useGame } from '../context/GameContext';
-import { calculateTrajectory, calculateLandingPosition } from '../utils/physics';
-import type { HeatZoneData, DisturbanceParams, TrajectoryPoint } from '../types/game';
+import { calculateTrajectory, calculateLandingPosition, filterReplayRounds } from '../utils/physics';
+import type { HeatZoneData, DisturbanceParams, TrajectoryPoint, ReplayRound } from '../types/game';
 
 export default function ThreeScene() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -19,9 +19,12 @@ export default function ThreeScene() {
   const trajectoryPointsRef = useRef<TrajectoryPoint[]>([]);
   const heatZoneRef = useRef<THREE.Group | null>(null);
   const windIndicatorRef = useRef<THREE.ArrowHelper | null>(null);
+  const replayTrajectoriesRef = useRef<THREE.Group | null>(null);
+  const hitMarkersRef = useRef<THREE.Group | null>(null);
 
   const { state, endThrow } = useGame();
-  const { params, isPlaying, currentTrajectory, heatZoneData, disturbanceParams } = state;
+  const { params, isPlaying, currentTrajectory, heatZoneData, disturbanceParams, replay } = state;
+  const isReplayMode = replay.currentSession !== null;
 
   const currentDisturbance = useRef<DisturbanceParams>(disturbanceParams);
   currentDisturbance.current = disturbanceParams;
@@ -154,6 +157,125 @@ export default function ThreeScene() {
       scene.add(arrow);
       windIndicatorRef.current = arrow;
     }
+  };
+
+  const clearReplayTrajectories = (scene: THREE.Scene) => {
+    if (replayTrajectoriesRef.current) {
+      scene.remove(replayTrajectoriesRef.current);
+      replayTrajectoriesRef.current.traverse((obj) => {
+        if (obj instanceof THREE.Line) {
+          obj.geometry.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose());
+          } else {
+            obj.material.dispose();
+          }
+        }
+      });
+      replayTrajectoriesRef.current = null;
+    }
+  };
+
+  const clearHitMarkers = (scene: THREE.Scene) => {
+    if (hitMarkersRef.current) {
+      scene.remove(hitMarkersRef.current);
+      hitMarkersRef.current.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose());
+          } else {
+            obj.material.dispose();
+          }
+        }
+      });
+      hitMarkersRef.current = null;
+    }
+  };
+
+  const createReplayTrajectories = (scene: THREE.Scene, rounds: ReplayRound[], mode: 'all' | 'current' | 'none', currentIndex: number) => {
+    clearReplayTrajectories(scene);
+    if (mode === 'none' || rounds.length === 0) return;
+
+    const group = new THREE.Group();
+    const displayRounds = mode === 'all' ? rounds : [rounds[currentIndex]];
+
+    displayRounds.forEach((round, idx) => {
+      const isCurrent = mode === 'all' ? idx === currentIndex : true;
+      const trajectory = round.trajectory;
+      if (trajectory.length < 2) return;
+
+      const points = trajectory.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+      const player1Color = 0x228be6;
+      const player2Color = 0xbe4bdb;
+      const baseColor = round.player === 1 ? player1Color : player2Color;
+
+      const material = new THREE.LineBasicMaterial({
+        color: baseColor,
+        linewidth: isCurrent ? 3 : 1,
+        opacity: isCurrent ? 1 : 0.4,
+        transparent: true,
+      });
+
+      const line = new THREE.Line(geometry, material);
+      group.add(line);
+
+      if (isCurrent && round.isKeyMoment) {
+        const keyMomentMarker = new THREE.Mesh(
+          new THREE.RingGeometry(0.15, 0.25, 16),
+          new THREE.MeshBasicMaterial({ color: 0xffd700, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+        );
+        keyMomentMarker.rotation.x = -Math.PI / 2;
+        keyMomentMarker.position.copy(points[Math.floor(points.length / 2)]);
+        keyMomentMarker.position.y += 0.5;
+        group.add(keyMomentMarker);
+      }
+    });
+
+    scene.add(group);
+    replayTrajectoriesRef.current = group;
+  };
+
+  const createHitMarkers = (scene: THREE.Scene, rounds: ReplayRound[], show: boolean) => {
+    clearHitMarkers(scene);
+    if (!show || rounds.length === 0) return;
+
+    const group = new THREE.Group();
+
+    rounds.forEach((round) => {
+      if (!round.hit) return;
+
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 16, 16),
+        new THREE.MeshStandardMaterial({
+          color: round.player === 1 ? 0x228be6 : 0xbe4bdb,
+          emissive: round.player === 1 ? 0x114488 : 0x552277,
+          emissiveIntensity: 0.5,
+          transparent: true,
+          opacity: 0.8,
+        })
+      );
+      marker.position.set(round.landPosition.x, round.landPosition.y + 0.1, round.landPosition.z);
+      group.add(marker);
+
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.2, 0.3, 16),
+        new THREE.MeshBasicMaterial({
+          color: round.player === 1 ? 0x228be6 : 0xbe4bdb,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.6,
+        })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(round.landPosition.x, 0.01, round.landPosition.z);
+      group.add(ring);
+    });
+
+    scene.add(group);
+    hitMarkersRef.current = group;
   };
 
   useEffect(() => {
@@ -507,6 +629,34 @@ export default function ThreeScene() {
       updateWindIndicator(sceneRef.current, disturbanceParams);
     }
   }, [disturbanceParams, params.launchPosition]);
+
+  const filteredReplayRounds = useMemo(() => {
+    if (!isReplayMode || !replay.currentSession) return [];
+    return filterReplayRounds(replay.currentSession, replay.filter);
+  }, [isReplayMode, replay.currentSession, replay.filter]);
+
+  useEffect(() => {
+    if (!sceneRef.current || !isReplayMode || !replay.currentSession) {
+      if (sceneRef.current) {
+        clearReplayTrajectories(sceneRef.current);
+        clearHitMarkers(sceneRef.current);
+      }
+      return;
+    }
+
+    createReplayTrajectories(
+      sceneRef.current,
+      filteredReplayRounds,
+      replay.showTrajectories,
+      replay.currentRoundIndex
+    );
+
+    createHitMarkers(
+      sceneRef.current,
+      filteredReplayRounds,
+      replay.showHitMarkers
+    );
+  }, [isReplayMode, replay.currentSession, replay.currentRoundIndex, replay.showTrajectories, replay.showHitMarkers, filteredReplayRounds]);
 
   useEffect(() => {
     if (isPlaying) {
