@@ -19,7 +19,7 @@ export interface ThrowResult {
   disturbanceParams?: DisturbanceParams;
 }
 
-export type GameMode = 'free' | 'training' | 'smart-training';
+export type GameMode = 'free' | 'training' | 'smart-training' | 'battle';
 
 export type TrainingDifficulty = 'easy' | 'medium' | 'hard';
 
@@ -128,6 +128,8 @@ export interface GameState {
   heatZoneData: HeatZoneData | null;
   smartTrainingSession: SmartTrainingSession | null;
   trainingAnalysis: TrainingAnalysisData | null;
+  battleSession: BattleSession | null;
+  battleAnalysis: BattleAnalysisData | null;
 }
 
 export interface TrajectoryPoint {
@@ -135,4 +137,96 @@ export interface TrajectoryPoint {
   y: number;
   z: number;
   t: number;
+}
+
+export type BattleMode = 'timed' | 'rounds';
+
+export interface BattleConfig {
+  mode: BattleMode;
+  rounds: number;
+  timeLimitSeconds: number;
+  distance: number;
+  potRadius: number;
+  disturbance: DisturbanceParams;
+  streakBonusThreshold: number;
+  streakBonusPoints: number;
+  player1Name: string;
+  player2Name: string;
+}
+
+export interface BattlePlayerRound {
+  round: number;
+  player: 1 | 2;
+  params: GameParams;
+  hit: boolean;
+  deviationDistance: number;
+  landPosition: { x: number; y: number; z: number };
+  maxHeight: number;
+  flightTime: number;
+  streakCount: number;
+  roundScore: number;
+  timestamp: number;
+}
+
+export interface BattleSession {
+  id: number;
+  config: BattleConfig;
+  currentRound: number;
+  currentPlayer: 1 | 2;
+  rounds: BattlePlayerRound[];
+  player1Score: number;
+  player2Score: number;
+  player1Streak: number;
+  player2Streak: number;
+  player1Hits: number;
+  player2Hits: number;
+  completed: boolean;
+  startTime: number;
+  endTime?: number;
+  timedOut: boolean;
+}
+
+export interface BattleAnalysisData {
+  hitRateComparison: { round: string; player1: number; player2: number }[];
+  deviationComparison: { round: string; player1: number; player2: number; player1Avg: number; player2Avg: number }[];
+  forceStability: { round: string; player1Force: number; player2Force: number; player1Avg: number; player2Avg: number; player1Hit: number; player2Hit: number }[];
+  keyRounds: { round: number; player1Score: number; player2Score: number; player1Hit: boolean; player2Hit: boolean; swing: number }[];
+  summary: {
+    player1Name: string;
+    player2Name: string;
+    player1TotalScore: number;
+    player2TotalScore: number;
+    player1HitRate: number;
+    player2HitRate: number;
+    player1AvgDeviation: number;
+    player2AvgDeviation: number;
+    player1ForceStd: number;
+    player2ForceStd: number;
+    player1MaxStreak: number;
+    player2MaxStreak: number;
+    winner: 1 | 2 | 0;
+    totalRounds: number;
+    duration: number;
+  };
+}
+
+export interface BattleHistoryEntry {
+  id: number;
+  date: number;
+  player1Name: string;
+  player2Name: string;
+  player1Score: number;
+  player2Score: number;
+  winner: 1 | 2 | 0;
+  mode: BattleMode;
+  rounds: number;
+}
+
+export interface BattleLeaderboardEntry {
+  playerName: string;
+  wins: number;
+  losses: number;
+  totalScore: number;
+  avgHitRate: number;
+  maxStreak: number;
 }

@@ -8,6 +8,9 @@ import type {
   DisturbanceParams,
   SmartTrainingSession,
   TrainingAnalysisData,
+  BattleConfig,
+  BattleSession,
+  BattleAnalysisData,
 } from '../types/game';
 import {
   calculateTrajectory,
@@ -19,6 +22,11 @@ import {
   calculateHeatZone,
   createSmartTrainingSession,
   analyzeTrainingSession,
+  createBattleSession,
+  processBattleRound,
+  analyzeBattleSession,
+  saveBattleHistory,
+  updateBattleLeaderboard,
 } from '../utils/physics';
 
 const initialParams: GameParams = {
@@ -43,6 +51,8 @@ const initialState: GameState = {
   heatZoneData: null,
   smartTrainingSession: null,
   trainingAnalysis: null,
+  battleSession: null,
+  battleAnalysis: null,
 };
 
 type GameAction =
@@ -60,7 +70,11 @@ type GameAction =
   | { type: 'END_SMART_TRAINING_THROW'; payload: ThrowResult }
   | { type: 'NEXT_SMART_LEVEL' }
   | { type: 'END_SMART_TRAINING'; payload: TrainingAnalysisData }
-  | { type: 'EXIT_SMART_TRAINING' };
+  | { type: 'EXIT_SMART_TRAINING' }
+  | { type: 'START_BATTLE'; payload: BattleConfig }
+  | { type: 'END_BATTLE_ROUND' }
+  | { type: 'BATTLE_TIMED_OUT' }
+  | { type: 'EXIT_BATTLE' };
 
 function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
@@ -77,6 +91,8 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         heatZoneData: null,
         smartTrainingSession: null,
         trainingAnalysis: null,
+        battleSession: null,
+        battleAnalysis: null,
       };
 
     case 'SET_PARAMS': {
@@ -268,7 +284,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       const sessionCompleted = (levelPassed && isLastLevel) || (levelFailed && isLastLevel);
       const sessionCompletedEarly = levelFailed && !isLastLevel;
 
-      let updatedSession: SmartTrainingSession = {
+      const updatedSession: SmartTrainingSession = {
         ...session,
         inTrainingResults: newSessionResults,
         completed: sessionCompleted || sessionCompletedEarly,
@@ -347,6 +363,132 @@ function gameReducer(state: GameState, action: GameAction): GameState {
           : state.results,
       };
 
+    case 'START_BATTLE': {
+      const config = action.payload;
+      const session = createBattleSession(config);
+      const newParams: GameParams = {
+        ...state.params,
+        launchPosition: { x: -config.distance, y: 1, z: 0 },
+        potPosition: { x: 0, y: 0, z: 0 },
+        potRadius: config.potRadius,
+      };
+      const trajectory = calculateTrajectory(newParams, config.disturbance);
+      return {
+        ...state,
+        mode: 'battle',
+        params: newParams,
+        currentTrajectory: trajectory,
+        results: [],
+        bestAngleRange: null,
+        trainingTarget: null,
+        trainingCompleted: false,
+        trainingScore: 0,
+        disturbanceParams: config.disturbance,
+        heatZoneData: null,
+        smartTrainingSession: null,
+        trainingAnalysis: null,
+        battleSession: session,
+        battleAnalysis: null,
+      };
+    }
+
+    case 'END_BATTLE_ROUND': {
+      const session = state.battleSession;
+      if (!session || session.completed) return state;
+      const { updatedSession, roundResult } = processBattleRound(session, state.params);
+      const newResults = [...state.results, {
+        id: state.results.length + 1,
+        timestamp: roundResult.timestamp,
+        params: roundResult.params,
+        hit: roundResult.hit,
+        deviationDistance: roundResult.deviationDistance,
+        landPosition: roundResult.landPosition,
+        maxHeight: roundResult.maxHeight,
+        flightTime: roundResult.flightTime,
+        bestAngleRangeAtTime: null,
+        disturbanceParams: { ...session.config.disturbance },
+      }];
+
+      let battleAnalysis: BattleAnalysisData | null = null;
+      if (updatedSession.completed) {
+        battleAnalysis = analyzeBattleSession(updatedSession);
+        const historyEntry = {
+          id: updatedSession.id,
+          date: updatedSession.startTime,
+          player1Name: updatedSession.config.player1Name,
+          player2Name: updatedSession.config.player2Name,
+          player1Score: updatedSession.player1Score,
+          player2Score: updatedSession.player2Score,
+          winner: battleAnalysis.summary.winner,
+          mode: updatedSession.config.mode,
+          rounds: updatedSession.config.rounds,
+        };
+        saveBattleHistory(historyEntry);
+        updateBattleLeaderboard(updatedSession);
+      }
+
+      const nextParams: GameParams = updatedSession.completed
+        ? state.params
+        : { ...state.params };
+      const trajectory = updatedSession.completed
+        ? state.currentTrajectory
+        : calculateTrajectory(nextParams, session.config.disturbance);
+
+      return {
+        ...state,
+        isPlaying: false,
+        params: nextParams,
+        currentTrajectory: trajectory,
+        results: newResults,
+        battleSession: updatedSession,
+        battleAnalysis,
+      };
+    }
+
+    case 'BATTLE_TIMED_OUT': {
+      const session = state.battleSession;
+      if (!session || session.completed) return state;
+      const timedOutSession: BattleSession = {
+        ...session,
+        completed: true,
+        timedOut: true,
+        endTime: Date.now(),
+      };
+      const battleAnalysis = analyzeBattleSession(timedOutSession);
+      const historyEntry = {
+        id: timedOutSession.id,
+        date: timedOutSession.startTime,
+        player1Name: timedOutSession.config.player1Name,
+        player2Name: timedOutSession.config.player2Name,
+        player1Score: timedOutSession.player1Score,
+        player2Score: timedOutSession.player2Score,
+        winner: battleAnalysis.summary.winner,
+        mode: timedOutSession.config.mode,
+        rounds: timedOutSession.config.rounds,
+      };
+      saveBattleHistory(historyEntry);
+      updateBattleLeaderboard(timedOutSession);
+      return {
+        ...state,
+        battleSession: timedOutSession,
+        battleAnalysis,
+      };
+    }
+
+    case 'EXIT_BATTLE':
+      return {
+        ...state,
+        mode: 'free',
+        battleSession: null,
+        battleAnalysis: null,
+        results: [],
+        bestAngleRange: null,
+        disturbanceParams: getDefaultDisturbance(),
+        trainingTarget: null,
+        trainingCompleted: false,
+        trainingScore: 0,
+      };
+
     default:
       return state;
   }
@@ -367,6 +509,10 @@ interface GameContextType {
   endSmartTrainingThrow: (result: ThrowResult) => void;
   nextSmartLevel: () => void;
   exitSmartTraining: () => void;
+  startBattle: (config: BattleConfig) => void;
+  performBattleThrow: () => void;
+  battleTimedOut: () => void;
+  exitBattle: () => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -389,6 +535,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const endThrow = (result: ThrowResult) => {
     if (state.mode === 'smart-training') {
       dispatch({ type: 'END_SMART_TRAINING_THROW', payload: result });
+    } else if (state.mode === 'battle') {
+      dispatch({ type: 'END_BATTLE_ROUND' });
     } else {
       dispatch({ type: 'END_THROW', payload: result });
     }
@@ -446,6 +594,23 @@ export function GameProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'EXIT_SMART_TRAINING' });
   };
 
+  const startBattle = (config: BattleConfig) => {
+    dispatch({ type: 'START_BATTLE', payload: config });
+  };
+
+  const performBattleThrow = () => {
+    if (state.isPlaying || !state.battleSession || state.battleSession.completed) return;
+    dispatch({ type: 'START_THROW' });
+  };
+
+  const battleTimedOut = () => {
+    dispatch({ type: 'BATTLE_TIMED_OUT' });
+  };
+
+  const exitBattle = () => {
+    dispatch({ type: 'EXIT_BATTLE' });
+  };
+
   return (
     <GameContext.Provider
       value={{
@@ -463,6 +628,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
         endSmartTrainingThrow,
         nextSmartLevel,
         exitSmartTraining,
+        startBattle,
+        performBattleThrow,
+        battleTimedOut,
+        exitBattle,
       }}
     >
       {children}

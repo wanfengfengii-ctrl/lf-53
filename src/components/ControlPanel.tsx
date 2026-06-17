@@ -34,6 +34,7 @@ import {
   IconGauge,
   IconAlertTriangle,
   IconClock,
+  IconSwords,
 } from '@tabler/icons-react';
 import { useGame } from '../context/GameContext';
 import { calculateHitRate, analyzeRecentPerformance } from '../utils/physics';
@@ -74,6 +75,7 @@ export default function ControlPanel() {
 
   const isThrowDisabled =
     isPlaying ||
+    mode === 'battle' ||
     (mode === 'training' && trainingCompleted) ||
     (mode === 'smart-training' && smartTrainingSession?.completed) ||
     (mode === 'smart-training' && trainingAnalysis !== null);
@@ -191,6 +193,8 @@ export default function ControlPanel() {
         return '训练模式';
       case 'smart-training':
         return '智能训练';
+      case 'battle':
+        return '多人对战';
       default:
         return m;
     }
@@ -274,7 +278,9 @@ export default function ControlPanel() {
                 ? 'blue'
                 : mode === 'training'
                 ? 'green'
-                : 'violet'
+                : mode === 'smart-training'
+                ? 'violet'
+                : 'orange'
             }
             variant="light"
             size="lg"
@@ -285,14 +291,31 @@ export default function ControlPanel() {
 
         <SegmentedControl
           value={mode}
-          onChange={(value) => setMode(value as 'free' | 'training' | 'smart-training')}
+          onChange={(value) => setMode(value as 'free' | 'training' | 'smart-training' | 'battle')}
           data={[
             { label: '自由实验', value: 'free' },
             { label: '训练模式', value: 'training' },
             { label: '🧠 智能训练', value: 'smart-training' },
+            { label: '⚔️ 对战', value: 'battle' },
           ]}
           fullWidth
         />
+
+        {mode === 'battle' && (
+          <>
+            <Divider my="xs" />
+            <Paper p="sm" bg="orange.0" radius="md" withBorder={false}>
+              <Group gap="xs">
+                <IconSwords size={18} color="#e8590c" />
+                <Text size="sm" fw={500}>多人对战排位</Text>
+              </Group>
+              <Text size="xs" c="dimmed" mt="xs">
+                切换到对战模式后，请在对战面板中设置比赛参数并开始对战。
+                两名玩家同屏轮流投壶，连中加分！
+              </Text>
+            </Paper>
+          </>
+        )}
 
         {mode === 'smart-training' && !smartTrainingSession && (
           <>

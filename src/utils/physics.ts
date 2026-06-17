@@ -10,6 +10,12 @@ import type {
   SmartTrainingLevel,
   SmartTrainingSession,
   TrainingAnalysisData,
+  BattleConfig,
+  BattleSession,
+  BattlePlayerRound,
+  BattleAnalysisData,
+  BattleHistoryEntry,
+  BattleLeaderboardEntry,
 } from '../types/game';
 
 const GRAVITY = 9.8;
@@ -451,6 +457,300 @@ export function analyzeRecentPerformance(
       : null;
 
   return { hitRate, avgDeviation, avgForce, forceStd, avgAngle, angleStd, bestAngle };
+}
+
+export function createBattleSession(config: BattleConfig): BattleSession {
+  return {
+    id: Date.now(),
+    config,
+    currentRound: 1,
+    currentPlayer: 1,
+    rounds: [],
+    player1Score: 0,
+    player2Score: 0,
+    player1Streak: 0,
+    player2Streak: 0,
+    player1Hits: 0,
+    player2Hits: 0,
+    completed: false,
+    startTime: Date.now(),
+    timedOut: false,
+  };
+}
+
+export function processBattleRound(
+  session: BattleSession,
+  params: GameParams
+): { updatedSession: BattleSession; roundResult: BattlePlayerRound } {
+  const { config } = session;
+  const trajectory = calculateTrajectory(params, config.disturbance);
+  const adjustedPotY = params.potPosition.y + config.disturbance.potHeightOffset;
+  const landingPos = calculateLandingPosition(trajectory, adjustedPotY);
+  const { hit, deviationDistance } = checkHit(
+    landingPos,
+    params.potPosition,
+    params.potRadius,
+    config.disturbance.potHeightOffset
+  );
+  const maxHeight = calculateMaxHeight(trajectory);
+  const flightTime = calculateFlightTime(trajectory);
+
+  const player = session.currentPlayer;
+  let streak = player === 1 ? session.player1Streak : session.player2Streak;
+  if (hit) {
+    streak += 1;
+  } else {
+    streak = 0;
+  }
+
+  const baseScore = hit ? 10 : 0;
+  const streakBonus =
+    streak >= config.streakBonusThreshold
+      ? config.streakBonusPoints * Math.floor(streak / config.streakBonusThreshold)
+      : 0;
+  const roundScore = baseScore + streakBonus;
+
+  const roundResult: BattlePlayerRound = {
+    round: session.currentRound,
+    player,
+    params: { ...params },
+    hit,
+    deviationDistance,
+    landPosition: landingPos,
+    maxHeight,
+    flightTime,
+    streakCount: streak,
+    roundScore,
+    timestamp: Date.now(),
+  };
+
+  const newRounds = [...session.rounds, roundResult];
+  let p1Score = session.player1Score;
+  let p2Score = session.player2Score;
+  let p1Streak = session.player1Streak;
+  let p2Streak = session.player2Streak;
+  let p1Hits = session.player1Hits;
+  let p2Hits = session.player2Hits;
+
+  if (player === 1) {
+    p1Score += roundScore;
+    p1Streak = streak;
+    if (hit) p1Hits += 1;
+  } else {
+    p2Score += roundScore;
+    p2Streak = streak;
+    if (hit) p2Hits += 1;
+  }
+
+  const player2Done =
+    newRounds.filter((r) => r.player === 2 && r.round === session.currentRound).length > 0;
+  const roundComplete = player === 1 ? false : player2Done;
+
+  const nextRound = roundComplete ? session.currentRound + 1 : session.currentRound;
+  const nextPlayer: 1 | 2 = player === 1 ? 2 : 1;
+  const maxRounds = config.mode === 'rounds' ? config.rounds : config.rounds;
+  const completed = nextRound > maxRounds;
+
+  const updatedSession: BattleSession = {
+    ...session,
+    currentRound: nextRound,
+    currentPlayer: completed ? session.currentPlayer : nextPlayer,
+    rounds: newRounds,
+    player1Score: p1Score,
+    player2Score: p2Score,
+    player1Streak: p1Streak,
+    player2Streak: p2Streak,
+    player1Hits: p1Hits,
+    player2Hits: p2Hits,
+    completed,
+    endTime: completed ? Date.now() : undefined,
+  };
+
+  return { updatedSession, roundResult };
+}
+
+export function analyzeBattleSession(session: BattleSession): BattleAnalysisData {
+  const p1Rounds = session.rounds.filter((r) => r.player === 1);
+  const p2Rounds = session.rounds.filter((r) => r.player === 2);
+  const totalRounds = session.config.rounds;
+
+  const hitRateComparison: BattleAnalysisData['hitRateComparison'] = [];
+  for (let i = 1; i <= totalRounds; i++) {
+    const p1UpTo = p1Rounds.filter((r) => r.round <= i);
+    const p2UpTo = p2Rounds.filter((r) => r.round <= i);
+    const p1Rate = p1UpTo.length > 0 ? (p1UpTo.filter((r) => r.hit).length / p1UpTo.length) * 100 : 0;
+    const p2Rate = p2UpTo.length > 0 ? (p2UpTo.filter((r) => r.hit).length / p2UpTo.length) * 100 : 0;
+    hitRateComparison.push({
+      round: `第${i}轮`,
+      player1: Number(p1Rate.toFixed(1)),
+      player2: Number(p2Rate.toFixed(1)),
+    });
+  }
+
+  const p1Devs = p1Rounds.map((r) => r.deviationDistance);
+  const p2Devs = p2Rounds.map((r) => r.deviationDistance);
+  const p1DevMA = movingAverage(p1Devs, 3);
+  const p2DevMA = movingAverage(p2Devs, 3);
+
+  const deviationComparison: BattleAnalysisData['deviationComparison'] = [];
+  for (let i = 0; i < totalRounds; i++) {
+    deviationComparison.push({
+      round: `第${i + 1}轮`,
+      player1: i < p1Devs.length ? Number(p1Devs[i].toFixed(2)) : 0,
+      player2: i < p2Devs.length ? Number(p2Devs[i].toFixed(2)) : 0,
+      player1Avg: i < p1DevMA.length ? Number(p1DevMA[i].toFixed(2)) : 0,
+      player2Avg: i < p2DevMA.length ? Number(p2DevMA[i].toFixed(2)) : 0,
+    });
+  }
+
+  const p1Forces = p1Rounds.map((r) => r.params.launchForce);
+  const p2Forces = p2Rounds.map((r) => r.params.launchForce);
+  const p1ForceMA = movingAverage(p1Forces, 3);
+  const p2ForceMA = movingAverage(p2Forces, 3);
+
+  const forceStability: BattleAnalysisData['forceStability'] = [];
+  for (let i = 0; i < totalRounds; i++) {
+    forceStability.push({
+      round: `第${i + 1}轮`,
+      player1Force: i < p1Forces.length ? Number(p1Forces[i].toFixed(1)) : 0,
+      player2Force: i < p2Forces.length ? Number(p2Forces[i].toFixed(1)) : 0,
+      player1Avg: i < p1ForceMA.length ? Number(p1ForceMA[i].toFixed(1)) : 0,
+      player2Avg: i < p2ForceMA.length ? Number(p2ForceMA[i].toFixed(1)) : 0,
+      player1Hit: i < p1Rounds.length && p1Rounds[i].hit ? 1 : 0,
+      player2Hit: i < p2Rounds.length && p2Rounds[i].hit ? 1 : 0,
+    });
+  }
+
+  const keyRounds: BattleAnalysisData['keyRounds'] = [];
+  for (let i = 1; i <= totalRounds; i++) {
+    const p1r = p1Rounds.find((r) => r.round === i);
+    const p2r = p2Rounds.find((r) => r.round === i);
+    if (p1r && p2r) {
+      const swing = (p1r.roundScore - p2r.roundScore);
+      keyRounds.push({
+        round: i,
+        player1Score: p1r.roundScore,
+        player2Score: p2r.roundScore,
+        player1Hit: p1r.hit,
+        player2Hit: p2r.hit,
+        swing,
+      });
+    }
+  }
+
+  const p1HitRate = p1Rounds.length > 0 ? (p1Rounds.filter((r) => r.hit).length / p1Rounds.length) * 100 : 0;
+  const p2HitRate = p2Rounds.length > 0 ? (p2Rounds.filter((r) => r.hit).length / p2Rounds.length) * 100 : 0;
+  const p1AvgDev = p1Rounds.length > 0 ? p1Rounds.reduce((s, r) => s + r.deviationDistance, 0) / p1Rounds.length : 0;
+  const p2AvgDev = p2Rounds.length > 0 ? p2Rounds.reduce((s, r) => s + r.deviationDistance, 0) / p2Rounds.length : 0;
+  const p1ForceStd = calculateStdDev(p1Forces);
+  const p2ForceStd = calculateStdDev(p2Forces);
+
+  let p1MaxStreak = 0;
+  let p2MaxStreak = 0;
+  let cur1 = 0;
+  let cur2 = 0;
+  for (const r of p1Rounds) {
+    cur1 = r.hit ? cur1 + 1 : 0;
+    p1MaxStreak = Math.max(p1MaxStreak, cur1);
+  }
+  for (const r of p2Rounds) {
+    cur2 = r.hit ? cur2 + 1 : 0;
+    p2MaxStreak = Math.max(p2MaxStreak, cur2);
+  }
+
+  const winner: 1 | 2 | 0 =
+    session.player1Score > session.player2Score ? 1
+    : session.player2Score > session.player1Score ? 2
+    : 0;
+
+  return {
+    hitRateComparison,
+    deviationComparison,
+    forceStability,
+    keyRounds,
+    summary: {
+      player1Name: session.config.player1Name,
+      player2Name: session.config.player2Name,
+      player1TotalScore: session.player1Score,
+      player2TotalScore: session.player2Score,
+      player1HitRate: Number(p1HitRate.toFixed(1)),
+      player2HitRate: Number(p2HitRate.toFixed(1)),
+      player1AvgDeviation: Number(p1AvgDev.toFixed(3)),
+      player2AvgDeviation: Number(p2AvgDev.toFixed(3)),
+      player1ForceStd: Number(p1ForceStd.toFixed(2)),
+      player2ForceStd: Number(p2ForceStd.toFixed(2)),
+      player1MaxStreak: p1MaxStreak,
+      player2MaxStreak: p2MaxStreak,
+      winner,
+      totalRounds,
+      duration: Math.round(((session.endTime || Date.now()) - session.startTime) / 1000),
+    },
+  };
+}
+
+const BATTLE_HISTORY_KEY = 'battle_history';
+const BATTLE_LEADERBOARD_KEY = 'battle_leaderboard';
+
+export function getBattleHistory(): BattleHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(BATTLE_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveBattleHistory(entry: BattleHistoryEntry): void {
+  const history = getBattleHistory();
+  history.unshift(entry);
+  if (history.length > 50) history.length = 50;
+  localStorage.setItem(BATTLE_HISTORY_KEY, JSON.stringify(history));
+}
+
+export function getBattleLeaderboard(): BattleLeaderboardEntry[] {
+  try {
+    const raw = localStorage.getItem(BATTLE_LEADERBOARD_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function updateBattleLeaderboard(session: BattleSession): void {
+  const lb = getBattleLeaderboard();
+  const updateEntry = (name: string, won: boolean, score: number, hitRate: number, maxStreak: number) => {
+    const existing = lb.find((e) => e.playerName === name);
+    if (existing) {
+      if (won) existing.wins += 1;
+      else existing.losses += 1;
+      existing.totalScore += score;
+      existing.avgHitRate = Number(((existing.avgHitRate * (existing.wins + existing.losses - 1) + hitRate) / (existing.wins + existing.losses)).toFixed(1));
+      existing.maxStreak = Math.max(existing.maxStreak, maxStreak);
+    } else {
+      lb.push({
+        playerName: name,
+        wins: won ? 1 : 0,
+        losses: won ? 0 : 1,
+        totalScore: score,
+        avgHitRate: Number(hitRate.toFixed(1)),
+        maxStreak,
+      });
+    }
+  };
+
+  const analysis = analyzeBattleSession(session);
+  const { winner } = analysis.summary;
+  updateEntry(session.config.player1Name, winner === 1, session.player1Score, analysis.summary.player1HitRate, analysis.summary.player1MaxStreak);
+  updateEntry(session.config.player2Name, winner === 2, session.player2Score, analysis.summary.player2HitRate, analysis.summary.player2MaxStreak);
+  if (winner === 0) {
+    const p1 = lb.find((e) => e.playerName === session.config.player1Name);
+    const p2 = lb.find((e) => e.playerName === session.config.player2Name);
+    if (p1) { p1.wins += 0; p1.losses += 0; }
+    if (p2) { p2.wins += 0; p2.losses += 0; }
+  }
+
+  lb.sort((a, b) => b.wins - a.wins || b.totalScore - a.totalScore);
+  localStorage.setItem(BATTLE_LEADERBOARD_KEY, JSON.stringify(lb));
 }
 
 export function generateSmartTrainingLevels(
