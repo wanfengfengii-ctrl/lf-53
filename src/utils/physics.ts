@@ -548,8 +548,9 @@ export function processBattleRound(
 
   const nextRound = roundComplete ? session.currentRound + 1 : session.currentRound;
   const nextPlayer: 1 | 2 = player === 1 ? 2 : 1;
-  const maxRounds = config.mode === 'rounds' ? config.rounds : config.rounds;
-  const completed = nextRound > maxRounds;
+  const isRoundsMode = config.mode === 'rounds';
+  const maxRounds = config.rounds;
+  const completed = isRoundsMode && nextRound > maxRounds;
 
   const updatedSession: BattleSession = {
     ...session,
@@ -572,7 +573,17 @@ export function processBattleRound(
 export function analyzeBattleSession(session: BattleSession): BattleAnalysisData {
   const p1Rounds = session.rounds.filter((r) => r.player === 1);
   const p2Rounds = session.rounds.filter((r) => r.player === 2);
-  const totalRounds = session.config.rounds;
+  const isTimedMode = session.config.mode === 'timed';
+
+  let totalRounds: number;
+  if (isTimedMode) {
+    const maxRoundP1 = p1Rounds.length > 0 ? Math.max(...p1Rounds.map(r => r.round)) : 0;
+    const maxRoundP2 = p2Rounds.length > 0 ? Math.max(...p2Rounds.map(r => r.round)) : 0;
+    totalRounds = Math.max(maxRoundP1, maxRoundP2);
+  } else {
+    totalRounds = session.config.rounds;
+  }
+  totalRounds = Math.max(totalRounds, 1);
 
   const hitRateComparison: BattleAnalysisData['hitRateComparison'] = [];
   for (let i = 1; i <= totalRounds; i++) {

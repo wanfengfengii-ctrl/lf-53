@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Card,
   Title,
@@ -10,14 +10,29 @@ import {
   Table,
   Stack,
   Tabs,
+  Button,
 } from '@mantine/core';
-import { IconTrophy, IconFlame, IconChartLine, IconClock, IconMedal } from '@tabler/icons-react';
+import { IconTrophy, IconFlame, IconChartLine, IconClock, IconMedal, IconRefresh } from '@tabler/icons-react';
 import { getBattleHistory, getBattleLeaderboard } from '../utils/physics';
 import type { BattleHistoryEntry, BattleLeaderboardEntry } from '../types/game';
+import { useGame } from '../context/GameContext';
 
 export default function BattleLeaderboard() {
-  const [leaderboard] = useState<BattleLeaderboardEntry[]>(() => getBattleLeaderboard());
-  const [history] = useState<BattleHistoryEntry[]>(() => getBattleHistory());
+  const { state } = useGame();
+  const { battleSession, battleAnalysis } = state;
+  const [leaderboard, setLeaderboard] = useState<BattleLeaderboardEntry[]>(() => getBattleLeaderboard());
+  const [history, setHistory] = useState<BattleHistoryEntry[]>(() => getBattleHistory());
+
+  const refreshData = () => {
+    setLeaderboard(getBattleLeaderboard());
+    setHistory(getBattleHistory());
+  };
+
+  useEffect(() => {
+    if (battleSession?.completed || battleAnalysis) {
+      refreshData();
+    }
+  }, [battleSession?.completed, battleAnalysis]);
 
   const medalColor = (rank: number) => {
     if (rank === 0) return '#fcc419';
@@ -28,7 +43,17 @@ export default function BattleLeaderboard() {
 
   return (
     <Card shadow="sm" p="md" radius="md" withBorder>
-      <Title order={3} mb="md">🏆 排行榜与历史战绩</Title>
+      <Group justify="space-between" align="center" mb="md">
+        <Title order={3}>🏆 排行榜与历史战绩</Title>
+        <Button
+          variant="subtle"
+          size="sm"
+          leftSection={<IconRefresh size={14} />}
+          onClick={refreshData}
+        >
+          刷新
+        </Button>
+      </Group>
 
       <Tabs defaultValue="leaderboard">
         <Tabs.List>

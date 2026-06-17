@@ -233,7 +233,7 @@ export default function BattlePanel() {
           <Group justify="space-between" align="center">
             <Title order={3}>⚔️ 对战中</Title>
             <Badge color="orange" variant="filled" size="lg">
-              第 {battleSession.currentRound} / {battleSession.config.rounds} 轮
+              {battleMode === 'timed' ? `第 ${battleSession.currentRound} 轮` : `第 ${battleSession.currentRound} / ${battleSession.config.rounds} 轮`}
             </Badge>
           </Group>
 
