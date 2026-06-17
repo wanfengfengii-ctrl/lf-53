@@ -4,33 +4,45 @@ import ThreeScene from './components/ThreeScene';
 import ControlPanel from './components/ControlPanel';
 import StatsCharts from './components/StatsCharts';
 import HistoryList from './components/HistoryList';
-import { GameProvider } from './context/GameContext';
+import TrainingAnalysis from './components/TrainingAnalysis';
+import { GameProvider, useGame } from './context/GameContext';
 
-function App() {
+function AppContent() {
   const [mobileOpened, { toggle }] = useDisclosure();
   const theme = useMantineTheme();
+  const { state, exitSmartTraining } = useGame();
+  const { trainingAnalysis, mode } = state;
+
+  const showTrainingAnalysis = mode === 'smart-training' && trainingAnalysis !== null;
 
   return (
-    <GameProvider>
-      <AppShell
-        header={{ height: 60 }}
-        padding="md"
-      >
-        <AppShell.Header>
-          <Group h="100%" px="md" justify="space-between">
-            <Group>
-              <Burger opened={mobileOpened} onClick={toggle} hiddenFrom="sm" size="sm" />
-              <Box>
-                <Title order={3} c="blue">🏺 投壶游戏模拟器</Title>
-              </Box>
-            </Group>
-            <Text size="sm" c="dimmed" visibleFrom="sm">
-              探索不同角度、力度与距离对命中率的影响
-            </Text>
+    <AppShell
+      header={{ height: 60 }}
+      padding="md"
+    >
+      <AppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Group>
+            <Burger opened={mobileOpened} onClick={toggle} hiddenFrom="sm" size="sm" />
+            <Box>
+              <Title order={3} c="blue">🏺 投壶游戏模拟器</Title>
+            </Box>
           </Group>
-        </AppShell.Header>
+          <Text size="sm" c="dimmed" visibleFrom="sm">
+            探索不同角度、力度与距离对命中率的影响
+          </Text>
+        </Group>
+      </AppShell.Header>
 
-        <AppShell.Main>
+      <AppShell.Main>
+        {showTrainingAnalysis ? (
+          <Box style={{ height: 'calc(100vh - 92px)', overflow: 'auto' }}>
+            <TrainingAnalysis
+              analysis={trainingAnalysis}
+              onClose={exitSmartTraining}
+            />
+          </Box>
+        ) : (
           <SimpleGrid
             cols={{ base: 1, lg: 3 }}
             spacing="md"
@@ -81,8 +93,16 @@ function App() {
               </Box>
             </Box>
           </SimpleGrid>
-        </AppShell.Main>
-      </AppShell>
+        )}
+      </AppShell.Main>
+    </AppShell>
+  );
+}
+
+function App() {
+  return (
+    <GameProvider>
+      <AppContent />
     </GameProvider>
   );
 }
